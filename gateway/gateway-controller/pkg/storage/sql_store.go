@@ -1396,11 +1396,12 @@ func (s *sqlStore) SaveLLMProviderTemplate(template *models.StoredLLMProviderTem
 	}
 
 	handle := template.GetHandle()
+	version := template.GetVersion()
 
 	query := `
 		INSERT INTO llm_provider_templates (
-			uuid, gateway_id, handle, configuration, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?)
+			uuid, gateway_id, handle, version, configuration, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
 	now := time.Now()
@@ -1408,6 +1409,7 @@ func (s *sqlStore) SaveLLMProviderTemplate(template *models.StoredLLMProviderTem
 		template.UUID,
 		s.gatewayId,
 		handle,
+		version,
 		string(configJSON),
 		now,
 		now,
@@ -1416,7 +1418,7 @@ func (s *sqlStore) SaveLLMProviderTemplate(template *models.StoredLLMProviderTem
 	if err != nil {
 		// Check for unique constraint violation
 		if s.isUniqueViolation(err) {
-			return fmt.Errorf("%w: template with handle '%s' already exists", ErrConflict, handle)
+			return fmt.Errorf("%w: template with handle '%s' and version '%s' already exists", ErrConflict, handle, version)
 		}
 		return fmt.Errorf("failed to insert template: %w", err)
 	}
@@ -1447,14 +1449,16 @@ func (s *sqlStore) UpdateLLMProviderTemplate(template *models.StoredLLMProviderT
 
 	handle := template.GetHandle()
 
+	version := template.GetVersion()
 	query := `
 		UPDATE llm_provider_templates
-		SET handle = ?, configuration = ?, updated_at = ?
+		SET handle = ?, version = ?, configuration = ?, updated_at = ?
 		WHERE uuid = ? AND gateway_id = ?
 	`
 
 	result, err := s.exec(query,
 		handle,
+		version,
 		string(configJSON),
 		time.Now(),
 		template.UUID,
@@ -1463,7 +1467,7 @@ func (s *sqlStore) UpdateLLMProviderTemplate(template *models.StoredLLMProviderT
 
 	if err != nil {
 		if s.isUniqueViolation(err) {
-			return fmt.Errorf("%w: template with handle '%s' already exists", ErrConflict, handle)
+			return fmt.Errorf("%w: template with handle '%s' and version '%s' already exists", ErrConflict, handle, version)
 		}
 		return fmt.Errorf("failed to update template: %w", err)
 	}
@@ -1587,12 +1591,15 @@ func (s *sqlStore) GetAllLLMProviderTemplates() ([]*models.StoredLLMProviderTemp
 	return templates, nil
 }
 
-// GetLLMProviderTemplateByHandle retrieves an LLM provider template by handle.
+// GetLLMProviderTemplateByHandle retrieves the latest (most recently created)
+// version of an LLM provider template by handle.
 func (s *sqlStore) GetLLMProviderTemplateByHandle(handle string) (*models.StoredLLMProviderTemplate, error) {
 	query := `
 		SELECT uuid, configuration, created_at, updated_at
 		FROM llm_provider_templates
 		WHERE gateway_id = ? AND handle = ?
+		ORDER BY created_at DESC
+		LIMIT 1
 	`
 
 	var template models.StoredLLMProviderTemplate
